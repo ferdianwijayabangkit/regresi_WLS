@@ -1,0 +1,192 @@
+---
+title: "Analisis Regresi Linier dengan WLS"
+author: "Analisis oleh Ferdian Bangkit Wijaya, "
+date: "2 September 2025."
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.width = 8, fig.height = 6)
+```
+
+## Pendahuluan
+
+Dokumen ini merupakan kelanjutan dari analisis regresi OLS. Tujuannya adalah untuk membangun model regresi menggunakan metode Weighted Least Squares (WLS). WLS adalah metode yang tepat digunakan ketika asumsi homoskedastisitas (varians sisaan yang konstan) pada model OLS tidak terpenuhi.
+
+WLS bekerja dengan memberikan "bobot" yang berbeda pada setiap observasi. Observasi dengan varians sisaan yang lebih besar (kurang dapat diandalkan) akan diberi bobot lebih kecil, dan sebaliknya.
+
+## Memuat Paket dan Data
+
+```{r paket}
+library(lmtest)
+library(car)
+library(nlme)
+library(readxl)
+```
+
+## Mengimpor Data dari File Excel
+
+```{r impor}
+# Ganti path file di bawah ini!
+file_path <- "C:/Users/user/OneDrive - untirta.ac.id/R Script/Github_Regresi_OLS/data_simulasi_gls.xlsx"
+data_WLS <- read_excel(file_path)
+```
+
+## Menampilkan Data yang diimport
+
+```{r heading}
+knitr::kable(head(data_WLS), caption = "Pratinjau 6 Baris Pertama Data")
+```
+
+## Membangun Model OLS Awal (Untuk Diagnosis)
+
+``` {r OLS}
+# Model OLS sama seperti file sebelumnya
+model_ols_awal <- lm(y ~ x1 + x2 + x3, data = data_WLS)
+```
+
+## Uji Asumsi Klasik (Diagnostik Sisaan)
+
+``` {r Grafik}
+par(mfrow = c(2, 2))
+plot(model_ols_awal)
+par(mfrow = c(1, 1))
+```
+
+Uji Normalitas (Shapiro-Wilk)
+
+Tujuan: Menguji apakah sisaan model berdistribusi normal.
+
+Hipotesis:
+
+H_0: Sisaan berdistribusi normal.
+
+H_1: Sisaan tidak berdistribusi normal.
+
+Kriteria Keputusan: Tolak H_0 jika p-value < 0.05. Asumsi normalitas terpenuhi jika kita gagal menolak H_0 (p-value > 0.05).
+
+``` {r Normal}
+print(shapiro.test(residuals(model_ols_awal)))
+```
+
+Uji Homoskedastisitas (Breusch-Pagan)
+
+Tujuan: Menguji apakah varians dari sisaan konstan (homoskedastisitas) atau tidak (heteroskedastisitas).
+
+Hipotesis:
+
+H_0: Varians sisaan konstan (homoskedastisitas).
+
+H_1: Varians sisaan tidak konstan (terdapat heteroskedastisitas).
+
+Kriteria Keputusan: Tolak H_0 jika p-value < 0.05. Asumsi homoskedastisitas terpenuhi jika kita gagal menolak H_0 (p-value > 0.05).
+
+``` {r Homogen}
+print(bptest(model_ols_awal))
+```
+
+Uji Autokorelasi (Durbin-Watson)
+
+Tujuan: Menguji apakah ada korelasi antar sisaan pada observasi yang berdekatan. Autokorelasi umumnya menjadi masalah pada data deret waktu (time series).
+
+Hipotesis:
+
+H_0: Tidak ada autokorelasi (koefisien autokorelasi = 0).
+
+H_1: Terdapat autokorelasi.
+
+Kriteria Keputusan: Tolak H_0 jika p-value < 0.05. Asumsi independensi sisaan terpenuhi jika kita gagal menolak H_0 (p-value > 0.05).
+
+``` {r Autokorelasi}
+print(dwtest(model_ols_awal))
+```
+
+Uji Multikolinearitas (VIF)
+
+Tujuan: Mendeteksi adanya korelasi yang tinggi antar variabel independen.
+
+Hipotesis: Uji VIF tidak menggunakan hipotesis H_0/H_1 dan p-value.
+
+Kriteria Keputusan: Menggunakan aturan praktis (rule of thumb). Nilai Variance Inflation Factor (VIF) > 5 atau 10 mengindikasikan adanya masalah multikolinearitas.
+
+Harapan: Nilai VIF untuk setiap variabel independen di bawah 5.
+
+``` {r Multikol}
+print(vif(model_ols_awal))
+```
+
+## Diagnosis Visual untuk Menentukan Sumber Heteroskedastisitas
+
+``` {r DiagHetero}
+# Dapatkan nilai absolut dari sisaan model OLS
+sisaan_abs <- abs(residuals(model_ols_awal))
+
+# Dapatkan nilai prediksi (fitted values) dari model OLS
+fitted_vals <- fitted(model_ols_awal)
+
+# Atur layout plot menjadi 2x2
+par(mfrow = c(2, 2))
+
+# Plot sisaan absolut vs setiap prediktor dan fitted values
+plot(data_WLS$x1, sisaan_abs, main = "Sisaan Absolut vs. X1", xlab = "x1", ylab = "Absolut Sisaan")
+plot(data_WLS$x2, sisaan_abs, main = "Sisaan Absolut vs. X2", xlab = "x2", ylab = "Absolut Sisaan")
+plot(data_WLS$x3, sisaan_abs, main = "Sisaan Absolut vs. X3", xlab = "x3", ylab = "Absolut Sisaan")
+plot(fitted_vals, sisaan_abs, main = "Sisaan Absolut vs. Fitted Values", xlab = "Fitted Values", ylab = "Absolut Sisaan")
+
+# Kembalikan layout ke default
+par(mfrow = c(1, 1))
+```
+
+## Keputusan Skema Pembobotan (Weighting Scheme)
+
+Kita membuat keputusan tentang bagaimana cara menghitung bobot.
+
+Aturan umum yang digunakan adalah:
+[Aturan Bobot W](https://github.com/ferdianwijayabangkit/supervised_learning-perkuliahan/blob/main/SPL-Perbandingan%20OLS%2C%20WLS%2C%20GLS.pdf)
+
+``` {r BobotW}
+# Menghitung bobot berdasarkan keputusan dari analisis visual
+# Penting: Metode ini mengasumsikan semua nilai x1 adalah positif.
+bobot_wls <- 1 / data_WLS$x1^2
+```
+
+## Pemodelan WLS dan Uji Asumsi Ulang
+
+``` {r WLSModel}
+# Membangun model WLS
+model_wls <- lm(y ~ x1 + x2 + x3, data = data_WLS, weights = bobot_wls)
+
+# Menampilkan ringkasan model WLS
+summary(model_wls)
+```
+
+``` {r AsumsiUlang}
+# Uji Normalitas pada sisaan WLS
+print(shapiro.test(residuals(model_wls)))
+
+# Uji Kehomogenan pada sisaan WLS
+print(bptest(model_wls))
+
+# Uji Autokorelasi pada sisaan WLS
+
+print(car::durbinWatsonTest(model_wls))
+
+# Uji Multikolinearitas (nilai VIF tidak akan berubah)
+print(vif(model_wls))
+```
+
+## Evaluasi Kebaikan Model (Goodness-of-Fit)
+
+``` {r GoFWLS}
+r_squared_wls <- summary(model_wls)$r.squared
+adj_r_squared_wls <- summary(model_wls)$adj.r.squared
+model_aic_wls <- AIC(model_wls)
+model_bic_wls <- BIC(model_wls)
+
+evaluasi_wls <- data.frame(
+  Metrik = c("R-squared", "Adjusted R-squared", "AIC", "BIC"),
+  Nilai = c(r_squared_wls, adj_r_squared_wls, model_aic_wls, model_bic_wls)
+)
+
+knitr::kable(evaluasi_wls, caption = "Metrik Kebaikan Model (Goodness-of-Fit) untuk WLS")
+```
